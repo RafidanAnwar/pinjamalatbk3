@@ -39,6 +39,13 @@ interface Transaksi {
   nomor_surat?: string;
 }
 
+interface DetailPinjamItem {
+  kode_alat: string;
+  nama: string;
+  kondisi: string;
+  jumlah: number;
+}
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'transaksi' | 'katalog' | 'laporan'>('transaksi');
@@ -61,6 +68,31 @@ export default function AdminDashboard() {
 
   useEffect(() => { setCurrentPageTransaksi(1); }, [searchTransaksi]);
   useEffect(() => { setCurrentPageKatalog(1); }, [searchKatalog, filterKetersediaan]);
+
+  // State Modal Detail Peminjaman
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [selectedTrxId, setSelectedTrxId] = useState('');
+  const [detailAlatList, setDetailAlatList] = useState<DetailPinjamItem[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const openDetailTransaksi = async (id_transaksi: string) => {
+    setSelectedTrxId(id_transaksi);
+    setIsDetailModalOpen(true);
+    setLoadingDetail(true);
+    setDetailAlatList([]);
+    try {
+      const res = await runServerFunction('getDetailTransaksi', id_transaksi);
+      if (res.success) {
+        setDetailAlatList(res.data || []);
+      } else {
+        toast({ title: 'Gagal Memuat Detail', description: res.error, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
 
   // State Modal Alat
   const [isAlatModalOpen, setIsAlatModalOpen] = useState(false);
@@ -263,7 +295,7 @@ export default function AdminDashboard() {
                         <th className="px-6 py-4">Instansi/Lokasi</th>
                         <th className="px-6 py-4">Keperluan</th>
                         <th className="px-6 py-4">Periode</th>
-                        <th className="px-6 py-4 text-center">Status File</th>
+                        <th className="px-6 py-4 text-center">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -283,13 +315,18 @@ export default function AdminDashboard() {
                             </td>
                             <td className="px-6 py-4">{new Date(trx.tgl_pinjam).toLocaleDateString()} - {new Date(trx.tgl_kembali).toLocaleDateString()}</td>
                             <td className="px-6 py-4 text-center">
-                              {trx.drive_file_id_surat && trx.drive_file_id_surat !== 'null' ? (
-                                <a href={`https://drive.google.com/file/d/${trx.drive_file_id_surat}/view`} target="_blank" rel="noreferrer" className="inline-flex items-center px-2 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-medium border border-green-200 transition-colors">
-                                  Lihat Surat
-                                </a>
-                              ) : (
-                                <span className="text-xs text-slate-400">Tidak ada</span>
-                              )}
+                              <div className="flex justify-center gap-2">
+                                <Button variant="outline" size="sm" className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => openDetailTransaksi(trx.id_transaksi)}>
+                                  Detail Alat
+                                </Button>
+                                {trx.drive_file_id_surat && trx.drive_file_id_surat !== 'null' ? (
+                                  <a href={`https://drive.google.com/file/d/${trx.drive_file_id_surat}/view`} target="_blank" rel="noreferrer" className="inline-flex items-center px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-md text-xs font-medium border border-green-200 transition-colors h-8">
+                                    Lihat Surat
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex items-center px-3 py-1 text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-md h-8">Tidak ada file</span>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -536,6 +573,59 @@ export default function AdminDashboard() {
               {isSubmittingAlat ? 'Menyimpan...' : 'Simpan Data'}
             </Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Detail Peminjaman */}
+      <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
+        <DialogContent className="sm:max-w-2xl bg-white max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-slate-800">
+              Detail Peminjaman Alat
+            </DialogTitle>
+            <DialogDescription className="text-slate-500">
+              ID Transaksi: <span className="font-semibold text-slate-700">{selectedTrxId}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-y-auto flex-1 mt-4 border rounded-md">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium sticky top-0">
+                <tr>
+                  <th className="px-4 py-3">Kode Alat</th>
+                  <th className="px-4 py-3">Nama Alat</th>
+                  <th className="px-4 py-3 text-center">Kondisi</th>
+                  <th className="px-4 py-3 text-center">Jumlah</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loadingDetail ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Memuat detail alat...</td></tr>
+                ) : detailAlatList.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Tidak ada data alat.</td></tr>
+                ) : (
+                  detailAlatList.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-900">{item.kode_alat}</td>
+                      <td className="px-4 py-3 text-slate-600">{item.nama}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${item.kondisi === 'Baik' ? 'bg-green-50 text-green-700' :
+                          item.kondisi === 'Diperingatkan' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                          }`}>
+                          {item.kondisi}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-medium">{item.jumlah}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="pt-4 flex justify-end">
+             <Button variant="outline" onClick={() => setIsDetailModalOpen(false)}>Tutup</Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -135,6 +135,15 @@ export function runServerFunction<T = any>(functionName: string, ...args: any[])
              { id_transaksi: 'TRX-171829400', nama_peminjam: 'Jane Smith', lokasi: 'PLTU Jawa', tgl_pinjam: '2024-10-16', tgl_kembali: '2024-10-20', drive_file_id_surat: 'mock-file-456', jenis_pengujian: 'DIPA', nomor_surat: 'ST/02/2026' }
            ]
         } as unknown as T);
+      } else if (functionName === 'getDetailTransaksi') {
+        const mockTrxId = args[0];
+        resolve({
+          success: true,
+          data: [
+            { kode_alat: 'AL-001', nama: 'High Volume Air Sampler (Mock)', kondisi: 'Baik', jumlah: 1 },
+            { kode_alat: 'AL-002', nama: 'Sound Level Meter (Mock)', kondisi: 'Baik', jumlah: 1 }
+          ]
+        } as unknown as T);
       } else if (functionName === 'getLaporanPeminjamanDetailed') {
         resolve({
            success: true,

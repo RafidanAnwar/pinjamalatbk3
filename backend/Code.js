@@ -25,6 +25,7 @@ function doPost(e) {
       'getKatalogAlat': getKatalogAlat,
       'getPeminjamanList': getPeminjamanList,
       'getLaporanPeminjamanDetailed': getLaporanPeminjamanDetailed,
+      'getDetailTransaksi': getDetailTransaksi,
       'addAlat': addAlat,
       'editAlat': editAlat
     };
@@ -376,6 +377,54 @@ function getLaporanPeminjamanDetailed() {
            jumlahPinjam: jumlah,
            status: alat.ketersediaan === 'Dipinjam' ? 'Dipinjam' : 'Selesai',
            kondisiKembali: mappedKondisi
+         });
+       }
+    }
+
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+// 6.6. Mengambil Detail Alat Berdasarkan ID Transaksi
+function getDetailTransaksi(id_transaksi) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    
+    // Ambil Data Detail
+    const sheetDetail = ss.getSheetByName('DetailPinjam');
+    if (!sheetDetail) throw new Error("Sheet DetailPinjam tidak ditemukan.");
+    const dataDetail = sheetDetail.getDataRange().getValues();
+    
+    // Ambil Data Katalog
+    const sheetKatalog = ss.getSheetByName('KatalogAlat');
+    if (!sheetKatalog) throw new Error("Sheet KatalogAlat tidak ditemukan.");
+    const dataKatalog = sheetKatalog.getDataRange().getValues();
+    
+    // Map Katalog
+    const katalogMap = {};
+    for (let i = 1; i < dataKatalog.length; i++) {
+        katalogMap[dataKatalog[i][0]] = {
+            nama: dataKatalog[i][1],
+            kondisi: dataKatalog[i][2],
+            ketersediaan: dataKatalog[i][3]
+        };
+    }
+
+    const result = [];
+    for (let i = 1; i < dataDetail.length; i++) {
+       const row = dataDetail[i];
+       if (row[0] === id_transaksi) {
+         const kode_alat = row[1];
+         const jumlah = row[2] || 1;
+         const alat = katalogMap[kode_alat];
+         
+         result.push({
+           kode_alat: kode_alat,
+           nama: alat ? alat.nama : 'Alat Tidak Dikenal',
+           kondisi: alat ? alat.kondisi : '-',
+           jumlah: jumlah
          });
        }
     }
