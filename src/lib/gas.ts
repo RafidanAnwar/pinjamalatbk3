@@ -34,15 +34,15 @@ function detectEnvironment(): 'gas' | 'vercel' | 'dev' {
 }
 
 /**
- * Memanggil fungsi di Code.gs via HTTP fetch (untuk mode Vercel).
- * GAS Web App mengembalikan redirect, jadi kita perlu follow redirect.
+ * Memanggil fungsi di Code.gs via Vercel proxy (untuk mode Vercel).
+ * Request dikirim ke /api/gas (same-origin) yang kemudian forward ke GAS.
+ * Ini menghindari masalah CORS karena browser hanya berkomunikasi dengan Vercel.
  */
 async function callGasViaHttp<T>(functionName: string, ...args: any[]): Promise<T> {
-  const response = await fetch(GAS_WEB_APP_URL, {
+  const response = await fetch('/api/gas', {
     method: 'POST',
-    redirect: 'follow',
     headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       action: functionName,
