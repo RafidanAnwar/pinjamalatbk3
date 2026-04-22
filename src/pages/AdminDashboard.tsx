@@ -1,0 +1,543 @@
+import { useState, useEffect } from 'react';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { LogOut, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { runServerFunction } from '@/lib/gas';
+import { toast } from '@/hooks/use-toast';
+import MonthlyReportGenerator, { Transaction } from '@/components/MonthlyReportGenerator';
+
+const alatSchema = z.object({
+  kode_alat: z.string().min(1, { message: 'Kode alat harus diisi' }),
+  nama: z.string().min(3, { message: 'Nama alat minimal 3 karakter' }),
+  kondisi: z.enum(['Baik', 'Diperingatkan', 'Rusak']),
+  ketersediaan: z.enum(['Ready', 'Dipinjam', 'Kalibrasi', 'Maintenance', 'Pengusulan Lelang', 'Not Ready', 'Dimusnahkan']),
+});
+type AlatFormValues = z.infer<typeof alatSchema>;
+
+interface Alat {
+  kode_alat: string;
+  nama: string;
+  kondisi: string;
+  ketersediaan: string;
+}
+
+interface Transaksi {
+  id_transaksi: string;
+  nama_peminjam: string;
+  lokasi: string;
+  tgl_pinjam: string;
+  tgl_kembali: string;
+  drive_file_id_surat: string;
+  jenis_pengujian?: string;
+  nomor_surat?: string;
+}
+
+export default function AdminDashboard() {
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'transaksi' | 'katalog' | 'laporan'>('transaksi');
+  const [loading, setLoading] = useState(false);
+  const [transaksiList, setTransaksiList] = useState<Transaksi[]>([]);
+  const [katalogList, setKatalogList] = useState<Alat[]>([]);
+  const [laporanList, setLaporanList] = useState<Transaction[]>([]);
+
+  // Filter States
+  const [searchTransaksi, setSearchTransaksi] = useState('');
+  const [searchKatalog, setSearchKatalog] = useState('');
+  const [filterKetersediaan, setFilterKetersediaan] = useState('Semua');
+
+  // Pagination States
+  const [currentPageTransaksi, setCurrentPageTransaksi] = useState(1);
+  const itemsPerPageTransaksi = 10;
+
+  const [currentPageKatalog, setCurrentPageKatalog] = useState(1);
+  const itemsPerPageKatalog = 10;
+
+  useEffect(() => { setCurrentPageTransaksi(1); }, [searchTransaksi]);
+  useEffect(() => { setCurrentPageKatalog(1); }, [searchKatalog, filterKetersediaan]);
+
+  // State Modal Alat
+  const [isAlatModalOpen, setIsAlatModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
+  const [isSubmittingAlat, setIsSubmittingAlat] = useState(false);
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<AlatFormValues>({
+    resolver: zodResolver(alatSchema),
+    defaultValues: { kode_alat: '', nama: '', kondisi: 'Baik', ketersediaan: 'Ready' }
+  });
+
+  const openAddAlat = () => {
+    setModalMode('add');
+    reset({ kode_alat: '', nama: '', kondisi: 'Baik', ketersediaan: 'Ready' });
+    setIsAlatModalOpen(true);
+  };
+
+  const openEditAlat = (alat: Alat) => {
+    setModalMode('edit');
+    reset({
+      kode_alat: alat.kode_alat,
+      nama: alat.nama,
+      kondisi: alat.kondisi as any,
+      ketersediaan: alat.ketersediaan as any
+    });
+    setIsAlatModalOpen(true);
+  };
+
+  const onSubmitAlat = async (data: AlatFormValues) => {
+    setIsSubmittingAlat(true);
+    try {
+      const funcName = modalMode === 'add' ? 'addAlat' : 'editAlat';
+      const res = await runServerFunction(funcName, data);
+      if (res.success) {
+        toast({ title: 'Berhasil', description: res.message });
+        setIsAlatModalOpen(false);
+        loadData();
+      } else {
+        throw new Error(res.error);
+      }
+    } catch (e: any) {
+      toast({ title: 'Gagal Menyimpan', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsSubmittingAlat(false);
+    }
+  };
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      if (activeTab === 'transaksi') {
+        const res = await runServerFunction('getPeminjamanList');
+        if (res.success) setTransaksiList(res.data || []);
+        else throw new Error(res.error);
+      } else if (activeTab === 'katalog') {
+        const res = await runServerFunction('getKatalogAlat');
+        if (res.success) setKatalogList(res.data || []);
+        else throw new Error(res.error);
+      } else if (activeTab === 'laporan') {
+        const res = await runServerFunction('getLaporanPeminjamanDetailed');
+        if (res.success) setLaporanList(res.data || []);
+        else throw new Error(res.error);
+      }
+    } catch (e: any) {
+      toast({ title: 'Gagal memuat data', description: e.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check auth
+    if (!localStorage.getItem('auth_token')) {
+      navigate('/login');
+      return;
+    }
+    loadData();
+  }, [activeTab]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    navigate('/');
+  };
+
+  const refreshData = () => {
+    loadData();
+  };
+
+  // Computed / Filtered Data
+  const filteredTransaksi = transaksiList.filter(trx =>
+    trx.nama_peminjam.toLowerCase().includes(searchTransaksi.toLowerCase()) ||
+    trx.id_transaksi.toLowerCase().includes(searchTransaksi.toLowerCase()) ||
+    trx.lokasi.toLowerCase().includes(searchTransaksi.toLowerCase())
+  );
+
+  const filteredKatalog = katalogList.filter(alat => {
+    const matchesSearch = alat.nama.toLowerCase().includes(searchKatalog.toLowerCase()) || alat.kode_alat.toLowerCase().includes(searchKatalog.toLowerCase());
+    const matchesFilter = filterKetersediaan === 'Semua' || alat.ketersediaan === filterKetersediaan;
+    return matchesSearch && matchesFilter;
+  });
+
+  // Pagination Logic
+  const totalPagesTransaksi = Math.ceil(filteredTransaksi.length / itemsPerPageTransaksi) || 1;
+  const currentTransaksi = filteredTransaksi.slice(
+    (currentPageTransaksi - 1) * itemsPerPageTransaksi,
+    currentPageTransaksi * itemsPerPageTransaksi
+  );
+
+  const totalPagesKatalog = Math.ceil(filteredKatalog.length / itemsPerPageKatalog) || 1;
+  const currentKatalog = filteredKatalog.slice(
+    (currentPageKatalog - 1) * itemsPerPageKatalog,
+    currentPageKatalog * itemsPerPageKatalog
+  );
+
+  // Stats
+  const totalTransaksi = transaksiList.length;
+  const totalAlat = katalogList.length;
+  const alatReady = katalogList.filter(a => a.ketersediaan === 'Ready').length;
+  const alatDipinjam = katalogList.filter(a => a.ketersediaan === 'Dipinjam').length;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 font-bold text-xl text-slate-800">
+            <PackageSearch className="text-blue-600 h-6 w-6" />
+            Admin Panel
+          </div>
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="sm" onClick={refreshData} disabled={loading}>
+              <RefreshCcw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Segarkan
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-slate-600 hover:text-red-600 hover:bg-red-50">
+              <LogOut className="h-4 w-4 mr-2" />
+              Keluar
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-max mb-8 border border-slate-200">
+          <button
+            onClick={() => setActiveTab('transaksi')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'transaksi' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+          >
+            Data Peminjaman
+          </button>
+          <button
+            onClick={() => setActiveTab('katalog')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'katalog' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+          >
+            Katalog Alat
+          </button>
+          <button
+            onClick={() => setActiveTab('laporan')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'laporan' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+          >
+            Laporan Bulanan
+          </button>
+        </div>
+
+        {activeTab === 'transaksi' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Card className="border-slate-200 shadow-sm border-l-4 border-l-blue-500">
+                <CardContent className="p-5 flex items-center gap-4">
+                  <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><PackageSearch size={24} /></div>
+                  <div>
+                    <p className="text-sm text-slate-500 font-medium">Total Peminjaman</p>
+                    <p className="text-2xl font-bold text-slate-800">{totalTransaksi}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="shadow-sm border-slate-200">
+              <CardHeader className="bg-white border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <CardTitle className="text-lg">Riwayat & Status Transaksi</CardTitle>
+                <div className="w-full sm:w-72">
+                  <Input
+                    placeholder="Cari ID, Nama, atau Lokasi..."
+                    value={searchTransaksi}
+                    onChange={e => setSearchTransaksi(e.target.value)}
+                    className="bg-slate-50"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium">
+                      <tr>
+                        <th className="px-6 py-4">ID Transaksi</th>
+                        <th className="px-6 py-4">Peminjam</th>
+                        <th className="px-6 py-4">Instansi/Lokasi</th>
+                        <th className="px-6 py-4">Keperluan</th>
+                        <th className="px-6 py-4">Periode</th>
+                        <th className="px-6 py-4 text-center">Status File</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {loading ? (
+                        <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">Memuat data...</td></tr>
+                      ) : filteredTransaksi.length === 0 ? (
+                        <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">Belum ada transaksi peminjaman.</td></tr>
+                      ) : (
+                        currentTransaksi.map(trx => (
+                          <tr key={trx.id_transaksi} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4 font-medium text-blue-600">{trx.id_transaksi}</td>
+                            <td className="px-6 py-4">{trx.nama_peminjam}</td>
+                            <td className="px-6 py-4">{trx.lokasi}</td>
+                            <td className="px-6 py-4">
+                              <div className="font-medium">{trx.jenis_pengujian || '-'}</div>
+                              <div className="text-xs text-slate-500">{trx.nomor_surat || '-'}</div>
+                            </td>
+                            <td className="px-6 py-4">{new Date(trx.tgl_pinjam).toLocaleDateString()} - {new Date(trx.tgl_kembali).toLocaleDateString()}</td>
+                            <td className="px-6 py-4 text-center">
+                              {trx.drive_file_id_surat && trx.drive_file_id_surat !== 'null' ? (
+                                <a href={`https://drive.google.com/file/d/${trx.drive_file_id_surat}/view`} target="_blank" rel="noreferrer" className="inline-flex items-center px-2 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-medium border border-green-200 transition-colors">
+                                  Lihat Surat
+                                </a>
+                              ) : (
+                                <span className="text-xs text-slate-400">Tidak ada</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Paginasi Transaksi */}
+                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-lg">
+                  <span className="text-sm text-slate-500">
+                    Menampilkan {filteredTransaksi.length > 0 ? (currentPageTransaksi - 1) * itemsPerPageTransaksi + 1 : 0} - {Math.min(currentPageTransaksi * itemsPerPageTransaksi, filteredTransaksi.length)} dari {filteredTransaksi.length} data
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline" size="sm"
+                      disabled={currentPageTransaksi === 1}
+                      onClick={() => setCurrentPageTransaksi(prev => Math.max(prev - 1, 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Sebelumnya
+                    </Button>
+                    <div className="flex items-center justify-center px-3 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-md">
+                      {currentPageTransaksi} / {totalPagesTransaksi}
+                    </div>
+                    <Button
+                      variant="outline" size="sm"
+                      disabled={currentPageTransaksi === totalPagesTransaksi || totalPagesTransaksi === 0}
+                      onClick={() => setCurrentPageTransaksi(prev => Math.min(prev + 1, totalPagesTransaksi))}
+                    >
+                      Berikutnya
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {activeTab === 'katalog' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="border-slate-200 shadow-sm border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-slate-500 font-medium">Total Alat</p>
+                  <p className="text-2xl font-bold text-slate-800">{totalAlat}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 shadow-sm border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-slate-500 font-medium">Alat Tersedia (Ready)</p>
+                  <p className="text-2xl font-bold text-green-700">{alatReady}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 shadow-sm border-l-4 border-l-purple-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-slate-500 font-medium">Alat Sedang Dipinjam</p>
+                  <p className="text-2xl font-bold text-purple-700">{alatDipinjam}</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="shadow-sm border-slate-200">
+              <CardHeader className="bg-white border-b border-slate-100 flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <CardTitle className="text-lg">Database Katalog Alat</CardTitle>
+                  <div className="flex gap-2">
+                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm" onClick={openAddAlat}>
+                      + Tambah Alat
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                  <Input
+                    placeholder="Cari nama atau kode alat..."
+                    value={searchKatalog}
+                    onChange={e => setSearchKatalog(e.target.value)}
+                    className="bg-slate-50 sm:max-w-xs"
+                  />
+                  <select
+                    value={filterKetersediaan}
+                    onChange={e => setFilterKetersediaan(e.target.value)}
+                    className="flex h-10 items-center justify-between rounded-md border border-input bg-slate-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:max-w-[200px]"
+                  >
+                    <option value="Semua">Semua Ketersediaan</option>
+                    <option value="Ready">Ready</option>
+                    <option value="Dipinjam">Dipinjam</option>
+                    <option value="Kalibrasi">Kalibrasi</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Pengusulan Lelang">Pengusulan Lelang</option>
+                    <option value="Not Ready">Not Ready</option>
+                    <option value="Dimusnahkan">Dimusnahkan</option>
+                  </select>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium">
+                      <tr>
+                        <th className="px-6 py-4">Kode Alat</th>
+                        <th className="px-6 py-4">Nama Alat</th>
+                        <th className="px-6 py-4 text-center">Kondisi</th>
+                        <th className="px-6 py-4 text-center">Ketersediaan</th>
+                        <th className="px-6 py-4 text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {loading ? (
+                        <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">Memuat data...</td></tr>
+                      ) : filteredKatalog.length === 0 ? (
+                        <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">Tidak ada alat yang sesuai pencarian/filter.</td></tr>
+                      ) : (
+                        currentKatalog.map(item => (
+                          <tr key={item.kode_alat} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4 font-medium text-slate-900">{item.kode_alat}</td>
+                            <td className="px-6 py-4 text-slate-600">{item.nama}</td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${item.kondisi === 'Baik' ? 'bg-green-50 text-green-700' :
+                                item.kondisi === 'Diperingatkan' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                                }`}>
+                                {item.kondisi}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${item.ketersediaan === 'Ready' ? 'bg-blue-50 text-blue-700' :
+                                item.ketersediaan === 'Dipinjam' ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                {item.ketersediaan}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <Button variant="ghost" size="sm" className="text-blue-600 h-8" onClick={() => openEditAlat(item)}>Edit</Button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Paginasi Katalog */}
+                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-lg">
+                  <span className="text-sm text-slate-500">
+                    Menampilkan {filteredKatalog.length > 0 ? (currentPageKatalog - 1) * itemsPerPageKatalog + 1 : 0} - {Math.min(currentPageKatalog * itemsPerPageKatalog, filteredKatalog.length)} dari {filteredKatalog.length} data
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline" size="sm"
+                      disabled={currentPageKatalog === 1}
+                      onClick={() => setCurrentPageKatalog(prev => Math.max(prev - 1, 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Sebelumnya
+                    </Button>
+                    <div className="flex items-center justify-center px-3 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-md">
+                      {currentPageKatalog} / {totalPagesKatalog}
+                    </div>
+                    <Button
+                      variant="outline" size="sm"
+                      disabled={currentPageKatalog === totalPagesKatalog || totalPagesKatalog === 0}
+                      onClick={() => setCurrentPageKatalog(prev => Math.min(prev + 1, totalPagesKatalog))}
+                    >
+                      Berikutnya
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {activeTab === 'laporan' && (
+          <div className="space-y-6">
+
+            {loading ? (
+              <div className="p-8 text-center text-slate-500">Memuat data real dari server...</div>
+            ) : (
+              <MonthlyReportGenerator transactions={laporanList} />
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* Dialog Form Alat */}
+      <Dialog open={isAlatModalOpen} onOpenChange={setIsAlatModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-slate-800">
+              {modalMode === 'add' ? 'Tambah Alat Baru' : 'Edit Alat'}
+            </DialogTitle>
+            <DialogDescription className="text-slate-500">
+              Masukkan detail spesifikasi alat ke dalam katalog.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit(onSubmitAlat)} className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label className="text-slate-700">Kode Alat</Label>
+              <Input placeholder="AL-001..." {...register('kode_alat')} className={errors.kode_alat ? "border-red-500" : ""} />
+              {errors.kode_alat && <p className="text-sm text-red-500">{errors.kode_alat.message}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Nama Alat</Label>
+              <Input placeholder="High Volume Air Sampler" {...register('nama')} className={errors.nama ? "border-red-500" : ""} />
+              {errors.nama && <p className="text-sm text-red-500">{errors.nama.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-slate-700">Kondisi</Label>
+                <select
+                  {...register('kondisi')}
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <option value="Baik">Baik</option>
+                  <option value="Diperingatkan">Diperingatkan</option>
+                  <option value="Rusak">Rusak</option>
+                </select>
+                {errors.kondisi && <p className="text-sm text-red-500">{errors.kondisi.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-slate-700">Ketersediaan</Label>
+                <select
+                  {...register('ketersediaan')}
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <option value="Ready">Ready</option>
+                  <option value="Dipinjam">Dipinjam</option>
+                  <option value="Kalibrasi">Kalibrasi</option>
+                  <option value="Maintenance">Maintenance</option>
+                  <option value="Pengusulan Lelang">Pengusulan Lelang</option>
+                  <option value="Not Ready">Not Ready</option>
+                  <option value="Dimusnahkan">Dimusnahkan</option>
+                </select>
+                {errors.ketersediaan && <p className="text-sm text-red-500">{errors.ketersediaan.message}</p>}
+              </div>
+            </div>
+
+            <Button type="submit" disabled={isSubmittingAlat} className="w-full mt-2 h-11 bg-blue-600 hover:bg-blue-700 text-white shadow-md">
+              {isSubmittingAlat ? 'Menyimpan...' : 'Simpan Data'}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
