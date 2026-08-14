@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Trash2, Plus, UploadCloud, Calendar, User, Mail, MapPin, ShieldCheck, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { Trash2, Plus, UploadCloud, Calendar, User, Mail, MapPin, ShieldCheck, CheckCircle, Eye, EyeOff, RefreshCcw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { runServerFunction } from '@/lib/gas';
@@ -23,21 +23,7 @@ interface Alat {
   ketersediaan: string;
 }
 
-const formSchema = z.object({
-  nama_peminjam: z.string().min(3, { message: 'Nama harus diisi minimal 3 karakter' }),
-  email: z.string().email({ message: 'Email tidak valid' }),
-  lokasi: z.string().min(3, { message: 'Lokasi harus diisi' }),
-  jenis_pengujian: z.string().min(1, { message: 'Pilih jenis pengujian' }),
-  nomor_surat: z.string().min(1, { message: 'Nomor surat harus diisi' }),
-  tgl_pinjam: z.string().min(1, { message: 'Tanggal Pinjam harus diisi' }),
-  tgl_kembali: z.string().min(1, { message: 'Tanggal Kembali harus diisi' }),
-  detail: z.array(z.object({
-    kode_alat: z.string().min(1, { message: 'Pilih alat' }),
-    jumlah: z.number().min(1, { message: 'Minimal 1' })
-  })).min(1, { message: 'Minimal pilih 1 alat' })
-});
-
-type FormValues = z.infer<typeof formSchema>;
+import { formPeminjamanSchema, FormPeminjamanValues as FormValues } from '@/lib/schemas';
 
 export default function FormPeminjaman() {
   const navigate = useNavigate();
@@ -57,28 +43,39 @@ export default function FormPeminjaman() {
   const [isSuccessOpen, setIsSuccessOpen] = useState(false);
   const [successId, setSuccessId] = useState('');
 
-  const fetchKatalogAlat = () => {
+  const [katalogError, setKatalogError] = useState<string | null>(null);
+
+  const fetchKatalogAlat = (attempt = 0) => {
     setIsLoadingAlat(true);
+    setKatalogError(null);
     runServerFunction('getKatalogAlat')
       .then(res => {
         if (res.success) {
           setKatalogAlat(res.data);
         } else {
-          toast({ title: 'Gagal Memuat Alat', description: res.error, variant: 'destructive' });
+          if (attempt < 2) {
+            setTimeout(() => fetchKatalogAlat(attempt + 1), 3000);
+          } else {
+            setKatalogError(res.error || 'Gagal memuat daftar alat dari server.');
+          }
         }
       })
       .catch(err => {
-        toast({ title: 'Gagal Memuat Alat', description: err.message, variant: 'destructive' });
+        if (attempt < 2) {
+          setTimeout(() => fetchKatalogAlat(attempt + 1), 3000);
+        } else {
+          setKatalogError(err.message || 'Koneksi ke server gagal.');
+        }
       })
       .finally(() => setIsLoadingAlat(false));
   };
 
   useEffect(() => {
-    fetchKatalogAlat();
+    fetchKatalogAlat(0);
   }, []);
 
   const { register, control, handleSubmit, formState: { errors }, reset } = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formPeminjamanSchema),
     defaultValues: {
       nama_peminjam: '',
       email: '',
@@ -204,6 +201,10 @@ export default function FormPeminjaman() {
           </div>
           <img src={labImg} alt="Laboratorium" className="w-full object-cover rounded-xl shadow-inner mt-2 border border-slate-100" />
           
+          <div className="w-full p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-800 text-left">
+            <strong>ℹ Info Koneksi:</strong> Aplikasi terhubung ke cloud server Google. Jika respon awal membutuhkan beberapa detik (cold start), mohon tunggu sejenak.
+          </div>
+          
           <div className="w-full pt-6 border-t border-slate-200">
              <Button 
                type="button" 
@@ -314,46 +315,91 @@ export default function FormPeminjaman() {
                 <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
                    Daftar Alat
                 </h3>
-                <Button type="button" variant="outline" size="sm" onClick={() => append({ kode_alat: '', jumlah: 1 })} className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50">
+                <Button type="button" variant="outline" size="sm" onClick={() => append({ kode_alat: '', jumlah: 1 })} className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50" disabled={isLoadingAlat || !!katalogError}>
                   <Plus className="h-4 w-4 mr-1" /> Tambah Alat
                 </Button>
               </div>
-              
-              <div className="space-y-3">
-                {fields.map((field, index) => (
-                  <div key={field.id} className="flex gap-4 items-end bg-slate-50 p-4 rounded-lg border border-slate-100">
-                    <div className="flex-1 space-y-2">
-                       <Label>Nama / Kode Alat</Label>
-                       <select 
-                         {...register(`detail.${index}.kode_alat`)} 
-                         className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                       >
-                         <option value="">{isLoadingAlat ? "Memuat alat..." : "-- Pilih Alat --"}</option>
-                         {katalogAlat
-                            .filter(a => a.ketersediaan === 'Ready')
-                            .map(a => <option key={a.kode_alat} value={a.kode_alat}>{a.kode_alat} - {a.nama} ({a.kondisi})</option>)
-                         }
-                       </select>
-                       {errors?.detail?.[index]?.kode_alat && <p className="text-sm text-red-500">{errors.detail[index].kode_alat.message}</p>}
-                    </div>
-                    
-                    <div className="w-24 space-y-2">
-                       <Label>Jumlah</Label>
-                       <Input type="number" min="1" {...register(`detail.${index}.jumlah`, { valueAsNumber: true })} />
-                    </div>
 
-                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1} className="text-red-500 hover:text-red-700 hover:bg-red-50 mb-0.5">
-                       <Trash2 className="h-4 w-4" />
-                    </Button>
+              {/* Status Loading Katalog */}
+              {isLoadingAlat && (
+                <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                  <svg className="animate-spin h-5 w-5 text-blue-600 flex-shrink-0" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">Memuat daftar peralatan...</p>
+                    <p className="text-xs text-blue-600">Mungkin membutuhkan beberapa detik saat pertama kali dibuka.</p>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
+
+              {/* Error State dengan Tombol Coba Lagi */}
+              {!isLoadingAlat && katalogError && (
+                <div className="p-4 bg-red-50 rounded-lg border border-red-200 space-y-3">
+                  <p className="text-sm font-medium text-red-800">⚠ Gagal memuat daftar peralatan</p>
+                  <p className="text-xs text-red-600">{katalogError}</p>
+                  <Button
+                    type="button" size="sm" variant="outline"
+                    className="border-red-300 text-red-700 hover:bg-red-100 flex items-center gap-1.5"
+                    onClick={() => fetchKatalogAlat(0)}
+                  >
+                    <RefreshCcw className="h-3.5 w-3.5" /> Coba Lagi
+                  </Button>
+                </div>
+              )}
+
+              {/* Form Input Alat Normal */}
+              {!isLoadingAlat && !katalogError && (
+                <div className="space-y-3">
+                  {fields.map((field, index) => (
+                    <div key={field.id} className="flex gap-4 items-end bg-slate-50 p-4 rounded-lg border border-slate-100">
+                      <div className="flex-1 space-y-2">
+                         <Label>Nama / Kode Alat</Label>
+                         <select 
+                           {...register(`detail.${index}.kode_alat`)} 
+                           className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                         >
+                           <option value="">-- Pilih Alat --</option>
+                           {katalogAlat
+                              .filter(a => a.ketersediaan === 'Ready')
+                              .map(a => <option key={a.kode_alat} value={a.kode_alat}>{a.kode_alat} - {a.nama} ({a.kondisi})</option>)
+                           }
+                         </select>
+                         {errors?.detail?.[index]?.kode_alat && <p className="text-sm text-red-500">{errors.detail[index].kode_alat.message}</p>}
+                      </div>
+                      
+                      <div className="w-24 space-y-2">
+                         <Label>Jumlah</Label>
+                         <Input type="number" min="1" {...register(`detail.${index}.jumlah`, { valueAsNumber: true })} />
+                      </div>
+
+                      <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1} className="text-red-500 hover:text-red-700 hover:bg-red-50 mb-0.5">
+                         <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="pt-6">
-              <Button type="submit" disabled={isSubmitting} className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700 transition shadow-md">
-                {isSubmitting ? 'Memproses...' : 'Kirim Permohonan'}
+            <div className="pt-6 space-y-2">
+              <Button type="submit" disabled={isSubmitting || isLoadingAlat} className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700 transition shadow-md">
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Memproses...
+                  </span>
+                ) : 'Kirim Permohonan'}
               </Button>
+              {isSubmitting && (
+                <p className="text-center text-xs text-slate-500 animate-pulse">
+                  Mohon tunggu, proses upload & penyimpanan bisa memakan 15–30 detik. Jangan tutup halaman ini.
+                </p>
+              )}
             </div>
           </form>
         </CardContent>

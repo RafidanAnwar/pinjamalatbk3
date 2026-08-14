@@ -3,14 +3,16 @@ name: Deploy to Google Apps Script
 on:
   push:
     branches: [main]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Memungkinkan trigger manual via UI GitHub
 
 jobs:
-  deploy:
+  # ── Job 1: Jalankan Semua Automated Tests ─────────────────────────────
+  test:
+    name: "🧪 Jalankan Automated Tests"
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repositori
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -22,18 +24,54 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build React app (single file for GAS)
+      - name: Jalankan test suite & buat coverage
+        run: npm run test:coverage
+
+      - name: Upload laporan coverage test
+        uses: actions/upload-artifact@v4
+        if: always() # Tetap upload meskipun ada test yang gagal untuk diagnosa
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  # ── Job 2: Build & Deploy ke GAS (Hanya jika test lulus) ─────────────
+  deploy:
+    name: "🚀 Build & Deploy ke Google Apps Script"
+    runs-on: ubuntu-latest
+    needs: test # Deployment DIBLOK jika job test gagal!
+
+    steps:
+      - name: Checkout repositori
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build React app (single-file bundle untuk GAS)
         run: npm run build:gas
 
-      - name: Setup clasp credentials
+      - name: Setup kredensial clasp
         run: |
           echo '${{ secrets.CLASP_TOKEN }}' > ~/.clasprc.json
 
-      - name: Push to Google Apps Script
+      - name: Push kode ke Google Apps Script
         working-directory: ./backend
         run: npx @google/clasp push --force
 
-      - name: Deploy (update existing deployment)
+      - name: Update Deployment (Mempertahankan URL yang sama)
         working-directory: ./backend
         run: |
-          npx @google/clasp deploy -i "${{ secrets.GAS_DEPLOYMENT_ID }}" -d "Auto-deploy from GitHub $(date +'%Y-%m-%d %H:%M:%S')"
+          npx @google/clasp deploy -i "${{ secrets.GAS_DEPLOYMENT_ID }}" -d "Auto-deploy dari GitHub Actions $(date +'%Y-%m-%d %H:%M:%S')"
+
+      - name: Bersihkan file kredensial clasp
+        if: always() # Selalu jalankan pembersihan bahkan jika deploy gagal
+        run: |
+          rm -f ~/.clasprc.json
+

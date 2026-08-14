@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { viteSingleFile } from 'vite-plugin-singlefile';
@@ -9,8 +10,8 @@ const deployTarget = process.env.DEPLOY_TARGET || 'gas';
 export default defineConfig({
   plugins: [
     react(),
-    // Only use singlefile plugin for GAS deployment
-    ...(deployTarget === 'gas' ? [viteSingleFile()] : []),
+    // Only use singlefile plugin for GAS deployment (not during Vitest)
+    ...(deployTarget === 'gas' && !process.env.VITEST ? [viteSingleFile()] : []),
   ],
   resolve: {
     alias: {
@@ -29,4 +30,14 @@ export default defineConfig({
     : {
         outDir: 'dist', // Normal build output for Vercel
       },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      exclude: ['src/components/ui/**', 'src/assets/**', 'node_modules/**', 'src/test/**'],
+    },
+  },
 });

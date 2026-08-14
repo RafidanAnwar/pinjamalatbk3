@@ -3,23 +3,13 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { runServerFunction } from '@/lib/gas';
 import { toast } from '@/hooks/use-toast';
+import {
+  Transaction,
+  MONTH_NAMES,
+  aggregateReportData
+} from '@/lib/reportUtils';
 
-// Format Nama Bulan Bahasa Indonesia
-const MONTH_NAMES = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-];
-
-export interface Transaction {
-  id: string;
-  id_transaksi?: string;
-  tanggalPinjam: string; // format YYYY-MM-DD
-  jenisPengujian: string; 
-  namaAlat: string;
-  jumlahPinjam: number;
-  status: 'Selesai' | 'Dipinjam';
-  kondisiKembali: 'Baik' | 'Rusak' | 'Hilang' | 'Diperbaiki' | null;
-}
+export type { Transaction };
 
 /**
  * Helper untuk mengagregasi data dan mengenerate PDF Laporan Bulanan Murni
@@ -29,73 +19,12 @@ export const generateMonthlyReport = (
   selectedMonth: number, 
   selectedYear: number
 ) => {
-  // 1. FILTER DATA
-  const filtered = transactions.filter(t => {
-    if (!t.tanggalPinjam) return false;
-    const d = new Date(t.tanggalPinjam);
-    return (d.getMonth() + 1) === selectedMonth && d.getFullYear() === selectedYear;
-  });
-
-  // 2. AGREGASI DATA
-  
-  // -- Tabel 1: Rekap Tim berdasarkan Jenis Pengujian --
-  const rekapTimMap = new Map<string, Set<string>>();
-  filtered.forEach(t => {
-    const jenis = t.jenisPengujian || 'Tidak Diketahui';
-    if (!rekapTimMap.has(jenis)) {
-      rekapTimMap.set(jenis, new Set());
-    }
-    rekapTimMap.get(jenis)!.add(t.id_transaksi || t.id); // Asumsi id_transaksi merupakan unique identifier kegiatan tim
-  });
-
-  const tabel1Data: any[] = [];
-  let totalSeluruhTim = 0;
-  let index1 = 1;
-  rekapTimMap.forEach((idsSet, jenis) => {
-    tabel1Data.push([index1++, jenis, idsSet.size]);
-    totalSeluruhTim += idsSet.size;
-  });
-
-  // -- Tabel 2: Uraian Kegiatan --
-  // Total permintaan = jumlah transaksi yang unik
-  const totalPermintaan = new Set(filtered.map(t => t.id_transaksi || t.id)).size;
-  
-  let totalUnit = 0;
-  let unitBaik = 0;
-  let unitRusak = 0;
-  let unitHilang = 0;
-  let unitDiperbaiki = 0;
-
-  filtered.forEach(t => {
-    totalUnit += t.jumlahPinjam;
-    // Mengelompokkan berdasarkan kondisi kembalian akhir
-    if (t.kondisiKembali === 'Baik') unitBaik += t.jumlahPinjam;
-    else if (t.kondisiKembali === 'Rusak') unitRusak += t.jumlahPinjam;
-    else if (t.kondisiKembali === 'Hilang') unitHilang += t.jumlahPinjam;
-    else if (t.kondisiKembali === 'Diperbaiki') unitDiperbaiki += t.jumlahPinjam;
-  });
-
-  const tabel2Data = [
-    [1, 'Total permintaan peminjaman alat', totalPermintaan],
-    [2, 'Total unit alat yang dipinjam', totalUnit],
-    [3, 'Alat dikembalikan dalam kondisi baik dan lengkap', unitBaik],
-    [4, 'Alat dikembalikan dalam kondisi rusak ringan/berat', unitRusak],
-    [5, 'Alat dikembalikan dalam kondisi hilang/komponen kurang', unitHilang],
-    [6, 'Alat yang diperbaiki setelah pengembalian', unitDiperbaiki],
-  ];
-
-  // -- Tabel 3: Alat Sering Dipinjam (Top 10) --
-  const alatMap = new Map<string, number>();
-  filtered.forEach(t => {
-    const nama = t.namaAlat || 'Alat Tanpa Nama';
-    alatMap.set(nama, (alatMap.get(nama) || 0) + t.jumlahPinjam);
-  });
-
-  const alatSorted = Array.from(alatMap.entries())
-    .sort((a, b) => b[1] - a[1]) // Descending berdasarkan jumlahPinjam
-    .slice(0, 10);
-
-  const tabel3Data = alatSorted.map((item, idx) => [idx + 1, item[0], item[1]]);
+  const {
+    tabel1Data,
+    totalSeluruhTim,
+    tabel2Data,
+    tabel3Data
+  } = aggregateReportData(transactions, selectedMonth, selectedYear);
 
   // 3. GENERATE PDF DENGAN DESAIN DAN ALIGNMENT RESMi
   const doc = new jsPDF();

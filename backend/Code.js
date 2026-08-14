@@ -1,7 +1,13 @@
-const SPREADSHEET_ID = '1yM8sO85eecRs2zoc25bRvlVUYgh_1VhFXV9t-9bGdyw'; // Ganti dengan ID Spreadsheet Anda
-const DRIVE_FOLDER_ID = '1HdIgLgR8zpM9I0EequjoK4obNIpi68UT'; // Ganti dengan ID Folder Drive untuk simpan file
+const SPREADSHEET_ID = '1yM8sO85eecRs2zoc25bRvlVUYgh_1VhFXV9t-9bGdyw'; // ID Google Spreadsheet Database
+const DRIVE_FOLDER_ID = '1HdIgLgR8zpM9I0EequjoK4obNIpi68UT'; // ID Folder Google Drive Penyimpanan Surat Tugas
 
-// 1. doGet untuk menyajikan UI React (sebagai single file HTML)
+/**
+ * Endpoint HTTP GET: Menyajikan aplikasi React single-page bundle ke browser.
+ * Dipanggil saat pengguna membuka URL Web App GAS langsung.
+ *
+ * @param {object} e - Event parameter dari Google Apps Script
+ * @returns {HtmlOutput} Halaman HTML dengan viewport mobile dan izin iframe
+ */
 function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('Manajemen Peminjaman Alat K3')
@@ -9,14 +15,20 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-// 1.5. doPost sebagai API Router untuk akses via HTTP (Vercel deployment)
+/**
+ * Endpoint HTTP POST: Router API Serverless untuk komunikasi dari luar (misal: Vercel proxy).
+ * Menerima payload JSON: { action: string, params: array } dan meneruskannya ke fungsi yang sesuai.
+ *
+ * @param {object} e - Event parameter POST dari Google Apps Script
+ * @returns {TextOutput} Output JSON berisi { success: boolean, data?: any, error?: string }
+ */
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
     var action = body.action;
     var params = body.params || [];
 
-    // Daftar fungsi yang diizinkan dipanggil via HTTP
+    // Daftar whitelist fungsi yang diizinkan dipanggil via HTTP
     var allowedFunctions = {
       'authenticatePetugas': authenticatePetugas,
       'submitPeminjaman': submitPeminjaman,
@@ -27,7 +39,9 @@ function doPost(e) {
       'getLaporanPeminjamanDetailed': getLaporanPeminjamanDetailed,
       'getDetailTransaksi': getDetailTransaksi,
       'addAlat': addAlat,
-      'editAlat': editAlat
+      'editAlat': editAlat,
+      'deleteTransaksi': deleteTransaksi,
+      'editDetailPinjam': editDetailPinjam
     };
 
     if (!allowedFunctions[action]) {
@@ -50,7 +64,14 @@ function doPost(e) {
   }
 }
 
-// 2. Fungsi Backend untuk Upload File ke Drive
+/**
+ * Mengunggah file berkas (surat tugas PDF/gambar) ke folder Google Drive yang ditentukan.
+ *
+ * @param {string} base64Data - Konten file dalam format base64 string
+ * @param {string} fileName - Nama file yang akan disimpan
+ * @param {string} mimeType - Format MIME file (contoh: 'application/pdf', 'image/jpeg')
+ * @returns {{ success: boolean, drive_file_id?: string, url?: string, error?: string }}
+ */
 function uploadFileToDrive(base64Data, fileName, mimeType) {
   try {
     const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
@@ -71,10 +92,18 @@ function uploadFileToDrive(base64Data, fileName, mimeType) {
   }
 }
 
-// 3. Menyimpan Data Peminjaman Lengkap ke Google Sheets (Transaksi & Detail)
+/**
+ * Menyimpan data transaksi peminjaman baru ke Google Sheets dan mengubah status alat menjadi 'Dipinjam'.
+ * Dilengkapi dengan LockService untuk mencegah race-condition saat ada request bersamaan.
+ *
+ * @param {object} dataPeminjaman - Metadata peminjam (nama, email, lokasi, tgl_pinjam, tgl_kembali, dsb)
+ * @param {Array<{kode_alat: string, jumlah: number}>} dataDetailPinjam - Daftar alat yang dipinjam
+ * @returns {{ success: boolean, id_transaksi?: string, message?: string, error?: string }}
+ */
 function submitPeminjaman(dataPeminjaman, dataDetailPinjam) {
   // dataPeminjaman: { nama_peminjam, email, lokasi, tgl_pinjam, tgl_kembali, drive_file_id_surat }
   // dataDetailPinjam: [{ kode_alat, jumlah }, ...]
+
 
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -171,7 +200,14 @@ function submitPeminjaman(dataPeminjaman, dataDetailPinjam) {
   }
 }
 
-// 3.5. Menggabungkan Upload Drive dan Submit Peminjaman ke dalam 1 Request
+/**
+ * Mengunggah file berkas surat tugas ke Drive dan menyimpan transaksi peminjaman sekaligus dalam 1 request atomik.
+ *
+ * @param {object} dataPeminjaman - Metadata peminjaman
+ * @param {Array<{kode_alat: string, jumlah: number}>} dataDetailPinjam - Rincian alat yang dipinjam
+ * @param {{ base64Data: string, fileName: string, mimeType: string }} fileInfo - Informasi file surat tugas
+ * @returns {{ success: boolean, id_transaksi?: string, message?: string, error?: string }}
+ */
 function submitPeminjamanLengkap(dataPeminjaman, dataDetailPinjam, fileInfo) {
   try {
     // 1. Upload File Dulu
@@ -190,8 +226,15 @@ function submitPeminjamanLengkap(dataPeminjaman, dataDetailPinjam, fileInfo) {
   }
 }
 
-// 4. Autentikasi Petugas (Login)
+/**
+ * Memvalidasi kredensial login admin/petugas terhadap data di Sheet 'Users' menggunakan hash SHA-256.
+ *
+ * @param {string} username - Username petugas
+ * @param {string} password - Password petugas (raw atau di-hash)
+ * @returns {{ success: boolean, token?: string, user?: { username: string, nama_petugas: string }, error?: string }}
+ */
 function authenticatePetugas(username, password) {
+
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheetUsers = ss.getSheetByName('Users');
@@ -248,7 +291,11 @@ function bytesToHex(bytes) {
   return hexString;
 }
 
-// 5. Mengambil Data Katalog Alat
+/**
+ * Mengambil seluruh data peralatan dari Sheet 'KatalogAlat'.
+ *
+ * @returns {{ success: boolean, data?: Array<{kode_alat: string, nama: string, kondisi: string, ketersediaan: string}>, error?: string }}
+ */
 function getKatalogAlat() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -278,7 +325,11 @@ function getKatalogAlat() {
   }
 }
 
-// 6. Mengambil Data Peminjaman Lengkap
+/**
+ * Mengambil seluruh riwayat peminjaman dari Sheet 'TransaksiPeminjaman' diurutkan dari transaksi terbaru.
+ *
+ * @returns {{ success: boolean, data?: Array<object>, error?: string }}
+ */
 function getPeminjamanList() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -312,7 +363,12 @@ function getPeminjamanList() {
   }
 }
 
-// 6.5. Mengambil Data Laporan Peminjaman Detail (Joined Data)
+/**
+ * Mengambil data peminjaman yang telah di-join (Transaksi + DetailPinjam + KatalogAlat)
+ * untuk penyusunan Laporan Bulanan PDF.
+ *
+ * @returns {{ success: boolean, data?: Array<object>, error?: string }}
+ */
 function getLaporanPeminjamanDetailed() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -387,7 +443,12 @@ function getLaporanPeminjamanDetailed() {
   }
 }
 
-// 6.6. Mengambil Detail Alat Berdasarkan ID Transaksi
+/**
+ * Mengambil daftar alat yang dipinjam pada suatu ID transaksi tertentu.
+ *
+ * @param {string} id_transaksi - ID transaksi peminjaman
+ * @returns {{ success: boolean, data?: Array<{kode_alat: string, nama: string, kondisi: string, jumlah: number}>, error?: string }}
+ */
 function getDetailTransaksi(id_transaksi) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -435,7 +496,12 @@ function getDetailTransaksi(id_transaksi) {
   }
 }
 
-// 7. Tambah Alat Baru ke Katalog
+/**
+ * Menambahkan data unit alat baru ke Sheet 'KatalogAlat'.
+ *
+ * @param {{ kode_alat: string, nama: string, kondisi?: string, ketersediaan?: string }} dataAlat
+ * @returns {{ success: boolean, message?: string, kode_alat?: string, error?: string }}
+ */
 function addAlat(dataAlat) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -463,8 +529,14 @@ function addAlat(dataAlat) {
   }
 }
 
-// 8. Edit Data Alat di Katalog
+/**
+ * Mengubah data alat yang sudah ada di Sheet 'KatalogAlat'.
+ *
+ * @param {{ kode_alat: string, nama: string, kondisi: string, ketersediaan: string }} dataAlat
+ * @returns {{ success: boolean, message?: string, error?: string }}
+ */
 function editAlat(dataAlat) {
+
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheetKatalog = ss.getSheetByName('KatalogAlat');
@@ -492,6 +564,187 @@ function editAlat(dataAlat) {
     sheetKatalog.getRange(rowIndexToUpdate, 4).setValue(dataAlat.ketersediaan);
 
     return { success: true, message: 'Data alat berhasil diubah' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Menghapus transaksi peminjaman (karena pembatalan atau duplikasi order akibat gangguan sinyal).
+ * Otomatis mengembalikan ketersediaan semua alat yang terkait dalam transaksi tersebut menjadi 'Ready'.
+ *
+ * @param {string} id_transaksi - ID transaksi yang ingin dihapus (contoh: TRX-ABC12345)
+ * @returns {{ success: boolean, message?: string, error?: string }}
+ */
+function deleteTransaksi(id_transaksi) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+
+    try {
+      const sheetTransaksi = ss.getSheetByName('TransaksiPeminjaman');
+      const sheetDetail    = ss.getSheetByName('DetailPinjam');
+      const sheetKatalog   = ss.getSheetByName('KatalogAlat');
+
+      if (!sheetTransaksi || !sheetDetail || !sheetKatalog) {
+        throw new Error("Salah satu sheet tidak ditemukan.");
+      }
+
+      // 1. Kumpulkan kode_alat dan nomor baris yang perlu dihapus
+      const dataDetail = sheetDetail.getDataRange().getValues();
+      const alatToReset = [];
+      const rowsDetailToDelete = [];
+
+      for (let i = 1; i < dataDetail.length; i++) {
+        if (dataDetail[i][0] === id_transaksi) {
+          alatToReset.push(dataDetail[i][1]);
+          rowsDetailToDelete.push(i + 1);
+        }
+      }
+
+      // 2. Reset status alat → Ready
+      const dataKatalog = sheetKatalog.getDataRange().getValues();
+      for (let i = 1; i < dataKatalog.length; i++) {
+        if (alatToReset.indexOf(dataKatalog[i][0]) !== -1) {
+          sheetKatalog.getRange(i + 1, 4).setValue('Ready');
+        }
+      }
+
+      // 3. Hapus baris DetailPinjam dari bawah ke atas
+      for (let i = rowsDetailToDelete.length - 1; i >= 0; i--) {
+        sheetDetail.deleteRow(rowsDetailToDelete[i]);
+      }
+
+      // 4. Hapus baris TransaksiPeminjaman
+      const dataTransaksi = sheetTransaksi.getDataRange().getValues();
+      for (let i = dataTransaksi.length - 1; i >= 1; i--) {
+        if (dataTransaksi[i][0] === id_transaksi) {
+          sheetTransaksi.deleteRow(i + 1);
+          break;
+        }
+      }
+
+      return { success: true, message: 'Transaksi berhasil dihapus dan status alat direset ke Ready.' };
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Mencatat riwayat perubahan data (audit trail) ke Sheet 'LogPerubahan'.
+ *
+ * @param {string} id_transaksi - ID transaksi terkait
+ * @param {string} tipeAksi - Jenis aksi (contoh: 'EDIT_DETAIL', 'HAPUS_TRX')
+ * @param {string} petugas - Nama petugas yang melakukan tindakan
+ * @param {any} detailSebelum - Snapshot data sebelum perubahan
+ * @param {any} detailSesudah - Snapshot data sesudah perubahan
+ */
+function writeLog(id_transaksi, tipeAksi, petugas, detailSebelum, detailSesudah) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheetLog = ss.getSheetByName('LogPerubahan');
+
+    if (!sheetLog) {
+      sheetLog = ss.insertSheet('LogPerubahan');
+      sheetLog.appendRow(['waktu', 'id_transaksi', 'tipe_aksi', 'petugas', 'detail_sebelum', 'detail_sesudah']);
+    }
+
+    sheetLog.appendRow([
+      new Date().toISOString(),
+      id_transaksi,
+      tipeAksi,
+      petugas || 'admin',
+      JSON.stringify(detailSebelum),
+      JSON.stringify(detailSesudah)
+    ]);
+  } catch (e) {
+    console.log('writeLog error: ' + e.toString());
+  }
+}
+
+/**
+ * Mengubah atau mengganti daftar alat pada suatu transaksi peminjaman yang sudah tercatat.
+ * Me-reset status alat lama ke 'Ready', mengupdate status alat baru ke 'Dipinjam',
+ * serta mencatat riwayat ke 'LogPerubahan' sebagai audit trail.
+ *
+ * @param {string} id_transaksi - ID transaksi peminjaman
+ * @param {Array<{kode_alat: string, jumlah: number}>} dataDetailBaru - Daftar baru alat yang dipinjam
+ * @param {string} namaPetugas - Nama petugas yang melakukan pengeditan
+ * @returns {{ success: boolean, message?: string, error?: string }}
+ */
+function editDetailPinjam(id_transaksi, dataDetailBaru, namaPetugas) {
+
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+
+    try {
+      const sheetDetail  = ss.getSheetByName('DetailPinjam');
+      const sheetKatalog = ss.getSheetByName('KatalogAlat');
+
+      if (!sheetDetail || !sheetKatalog) {
+        throw new Error("Sheet tidak ditemukan.");
+      }
+
+      // === STEP 1: Snapshot alat LAMA untuk audit trail ===
+      const dataDetailSnapshot = sheetDetail.getDataRange().getValues();
+      const alatLama = [];
+      const rowsToDelete = [];
+      for (let i = 1; i < dataDetailSnapshot.length; i++) {
+        if (dataDetailSnapshot[i][0] === id_transaksi) {
+          alatLama.push({ kode_alat: dataDetailSnapshot[i][1], jumlah: dataDetailSnapshot[i][2] });
+          rowsToDelete.push(i + 1);
+        }
+      }
+
+      // === STEP 2: Reset status alat LAMA → Ready ===
+      const dataKatalog = sheetKatalog.getDataRange().getValues();
+      for (let i = 1; i < dataKatalog.length; i++) {
+        const isAlatLama = alatLama.some(function(a) { return a.kode_alat === dataKatalog[i][0]; });
+        if (isAlatLama) {
+          sheetKatalog.getRange(i + 1, 4).setValue('Ready');
+        }
+      }
+
+      // === STEP 3: Validasi ketersediaan alat BARU ===
+      const dataKatalogBaru = sheetKatalog.getDataRange().getValues();
+      const katalogMap = {};
+      for (let i = 1; i < dataKatalogBaru.length; i++) {
+        katalogMap[dataKatalogBaru[i][0]] = { row: i + 1, ketersediaan: dataKatalogBaru[i][3] };
+      }
+
+      for (let i = 0; i < dataDetailBaru.length; i++) {
+        const kode = dataDetailBaru[i].kode_alat;
+        if (!katalogMap[kode]) throw new Error('Alat "' + kode + '" tidak ditemukan di katalog.');
+        if (katalogMap[kode].ketersediaan !== 'Ready') {
+          throw new Error('Alat "' + kode + '" tidak tersedia (Status: ' + katalogMap[kode].ketersediaan + ').');
+        }
+      }
+
+      // === STEP 4: Hapus baris detail LAMA ===
+      for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+        sheetDetail.deleteRow(rowsToDelete[i]);
+      }
+
+      // === STEP 5: Insert detail BARU + update status alat BARU ===
+      for (let i = 0; i < dataDetailBaru.length; i++) {
+        const item = dataDetailBaru[i];
+        sheetDetail.appendRow([id_transaksi, item.kode_alat, item.jumlah || 1]);
+        sheetKatalog.getRange(katalogMap[item.kode_alat].row, 4).setValue('Dipinjam');
+      }
+
+      // === STEP 6: Catat ke LogPerubahan (audit trail) ===
+      writeLog(id_transaksi, 'EDIT_DETAIL', namaPetugas, alatLama, dataDetailBaru);
+
+      return { success: true, message: 'Detail pinjaman berhasil diperbarui dan perubahan dicatat.' };
+    } finally {
+      lock.releaseLock();
+    }
   } catch (error) {
     return { success: false, error: error.toString() };
   }

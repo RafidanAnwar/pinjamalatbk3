@@ -1,10 +1,15 @@
-// Deklarasi interface google untuk GAS agar TS tidak error saat di editor
+// Deklarasi interface google untuk GAS agar TypeScript tidak error saat editor bekerja
 declare const google: any;
 
-// URL GAS Web App untuk mode Vercel (menggunakan deployment URL yang sudah ada)
+/**
+ * URL deployment endpoint Google Apps Script Web App untuk mode Vercel.
+ * (Digunakan sebagai fallback/target proxy saat aplikasi dideploy di luar environment iframe GAS)
+ */
 const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxuke6RREg2p3IWN7AUV9Eqz3Wwa1yZU8rASGKJlrBmAtYz5Sy2oyRx8jvDolb5lLsxBg/exec';
 
-// Global mock state for development
+/**
+ * Mock data katalog alat untuk keperluan local development & testing tanpa koneksi internet/GAS.
+ */
 const mockKatalogData = [
   { kode_alat: 'AL-001', nama: 'High Volume Air Sampler (Mock)', kondisi: 'Baik', ketersediaan: 'Ready' },
   { kode_alat: 'AL-002', nama: 'Sound Level Meter (Mock)', kondisi: 'Baik', ketersediaan: 'Ready' },
@@ -13,12 +18,14 @@ const mockKatalogData = [
 ];
 
 /**
- * Deteksi environment saat ini:
- * - 'gas': berjalan di dalam iframe Google Apps Script (google.script.run tersedia)
- * - 'vercel': berjalan di Vercel/standalone (komunikasi via HTTP fetch ke GAS Web App)
- * - 'dev': berjalan di localhost (gunakan mock data)
+ * Mendeteksi environment runtime aplikasi saat ini:
+ * - `'gas'`: Berjalan di dalam iframe Google Apps Script (tersedia global `google.script.run`).
+ * - `'vercel'`: Berjalan sebagai SPA di Vercel atau server lain (komunikasi melalui HTTP proxy `/api/gas`).
+ * - `'dev'`: Berjalan di localhost (menggunakan mock data lokal agar dev cepat tanpa API latency).
+ *
+ * @returns {'gas' | 'vercel' | 'dev'} Identitas target runtime aktif
  */
-function detectEnvironment(): 'gas' | 'vercel' | 'dev' {
+export function detectEnvironment(): 'gas' | 'vercel' | 'dev' {
   // Cek apakah ada google.script.run (GAS iframe)
   if (typeof google !== 'undefined' && google.script && google.script.run) {
     return 'gas';
@@ -34,11 +41,17 @@ function detectEnvironment(): 'gas' | 'vercel' | 'dev' {
 }
 
 /**
- * Memanggil fungsi di Code.gs via Vercel proxy (untuk mode Vercel).
- * Request dikirim ke /api/gas (same-origin) yang kemudian forward ke GAS.
- * Ini menghindari masalah CORS karena browser hanya berkomunikasi dengan Vercel.
+ * Memanggil fungsi backend GAS melalui Vercel API Serverless Proxy (`/api/gas`).
+ * Request dikirim dengan skema same-origin ke Vercel, lalu Vercel meneruskannya ke GAS Web App.
+ * Hal ini sepenuhnya mencegah error CORS (Cross-Origin Resource Sharing) di browser.
+ *
+ * @template T - Tipe data kembalian yang diharapkan
+ * @param functionName - Nama fungsi backend di Code.js yang ingin dieksekusi
+ * @param args - Argumen parameter yang akan diteruskan ke fungsi tersebut
+ * @returns Promise berisi payload response JSON dari backend
+ * @throws Error jika HTTP status code bukan 2xx
  */
-async function callGasViaHttp<T>(functionName: string, ...args: any[]): Promise<T> {
+export async function callGasViaHttp<T>(functionName: string, ...args: any[]): Promise<T> {
   const response = await fetch('/api/gas', {
     method: 'POST',
     headers: {
@@ -59,18 +72,25 @@ async function callGasViaHttp<T>(functionName: string, ...args: any[]): Promise<
 }
 
 /**
- * Memanggil fungsi di Code.gs (Google Apps Script) dan mengembalikan Promise.
- * Secara otomatis mendeteksi environment:
- * - GAS: menggunakan google.script.run
- * - Vercel: menggunakan HTTP fetch ke GAS Web App
- * - Dev: menggunakan mock response
+ * Bridge Universal: Memanggil fungsi backend di Google Apps Script (Code.js) dan mengembalikan Promise.
  * 
- * @param functionName Nama fungsi backend yang ada di Code.gs
- * @param args Argumen yang akan dikirim ke fungsi backend
- * @returns Promise dengan hasil balikan dari backend (atau mock di localhost)
+ * Secara transparan dan otomatis menangani 3 kondisi runtime:
+ * 1. **GAS Native**: Membungkus callback `google.script.run` menjadi async Promise.
+ * 2. **Vercel / Production Web**: Menggunakan `callGasViaHttp` ke serverless API route `/api/gas`.
+ * 3. **Localhost (Dev)**: Mensimulasikan network delay dan mengembalikan dataset mock yang realistis.
+ * 
+ * @template T - Tipe data kembalian yang diharapkan
+ * @param functionName - Nama fungsi backend yang dideklarasikan di `backend/Code.js`
+ * @param args - Parameter yang dikirimkan ke fungsi backend
+ * @returns Promise dengan data hasil eksekusi dari backend
+ *
+ * @example
+ * // Mengambil daftar katalog alat
+ * const response = await runServerFunction<{ success: boolean; data: Alat[] }>('getKatalogAlat');
  */
 export function runServerFunction<T = any>(functionName: string, ...args: any[]): Promise<T> {
   const env = detectEnvironment();
+
 
   // === MODE GAS: gunakan google.script.run ===
   if (env === 'gas') {
@@ -162,6 +182,16 @@ export function runServerFunction<T = any>(functionName: string, ...args: any[])
         resolve({
           success: true,
           message: 'Mock alat berhasil diubah'
+        } as unknown as T);
+      } else if (functionName === 'deleteTransaksi') {
+        resolve({
+          success: true,
+          message: 'Transaksi berhasil dihapus dan status alat direset ke Ready (MOCK)'
+        } as unknown as T);
+      } else if (functionName === 'editDetailPinjam') {
+        resolve({
+          success: true,
+          message: 'Detail pinjaman berhasil diperbarui (MOCK)'
         } as unknown as T);
       } else {
         // Reject jika tidak ada mock template untuk fungs tersebut

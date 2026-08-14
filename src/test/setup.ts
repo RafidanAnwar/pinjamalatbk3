@@ -1,0 +1,16 @@
+import '@testing-library/jest-dom';
+import { beforeAll, afterAll, afterEach } from 'vitest';
+import { server } from './msw/server';
+
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'warn' });
+});
+
+afterEach(() => {
+  server.resetHandlers();
+  localStorage.clear();
+});
+
+afterAll(() => {
+  server.close();
+});

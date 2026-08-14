@@ -7,19 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { LogOut, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LogOut, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight, Trash2, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { runServerFunction } from '@/lib/gas';
 import { toast } from '@/hooks/use-toast';
 import MonthlyReportGenerator, { Transaction } from '@/components/MonthlyReportGenerator';
 
-const alatSchema = z.object({
-  kode_alat: z.string().min(1, { message: 'Kode alat harus diisi' }),
-  nama: z.string().min(3, { message: 'Nama alat minimal 3 karakter' }),
-  kondisi: z.enum(['Baik', 'Diperingatkan', 'Rusak']),
-  ketersediaan: z.enum(['Ready', 'Dipinjam', 'Kalibrasi', 'Maintenance', 'Pengusulan Lelang', 'Not Ready', 'Dimusnahkan']),
-});
-type AlatFormValues = z.infer<typeof alatSchema>;
+import { alatSchema, AlatFormValues } from '@/lib/schemas';
 
 interface Alat {
   kode_alat: string;
@@ -94,6 +88,93 @@ export default function AdminDashboard() {
     }
   };
 
+  // State Hapus Transaksi
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deletingTrxId, setDeletingTrxId] = useState('');
+  const [isDeletingTrx, setIsDeletingTrx] = useState(false);
+
+  const handleDeleteTransaksi = async () => {
+    setIsDeletingTrx(true);
+    try {
+      const res = await runServerFunction('deleteTransaksi', deletingTrxId);
+      if (res.success) {
+        toast({ title: 'Berhasil Dihapus', description: res.message });
+        setIsDeleteConfirmOpen(false);
+        loadData();
+      } else {
+        throw new Error(res.error);
+      }
+    } catch (e: any) {
+      toast({ title: 'Gagal Hapus', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsDeletingTrx(false);
+    }
+  };
+
+  // State Edit Detail Pinjaman
+  const [isEditDetailOpen, setIsEditDetailOpen] = useState(false);
+  const [editingTrx, setEditingTrx] = useState<Transaksi | null>(null);
+  const [editDetailList, setEditDetailList] = useState<{ kode_alat: string; jumlah: number }[]>([]);
+  const [isLoadingEditDetail, setIsLoadingEditDetail] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
+  const openEditDetail = async (trx: Transaksi) => {
+    setEditingTrx(trx);
+    setIsEditDetailOpen(true);
+    setIsLoadingEditDetail(true);
+    setEditDetailList([]);
+    try {
+      const res = await runServerFunction('getDetailTransaksi', trx.id_transaksi);
+      if (res.success) {
+        setEditDetailList((res.data || []).map((d: any) => ({
+          kode_alat: d.kode_alat,
+          jumlah: d.jumlah || 1
+        })));
+      } else {
+        throw new Error(res.error);
+      }
+    } catch (e: any) {
+      toast({ title: 'Gagal memuat detail', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsLoadingEditDetail(false);
+    }
+  };
+
+  const handleSaveEditDetail = async () => {
+    if (!editingTrx) return;
+    if (editDetailList.length === 0) {
+      toast({ title: 'Validasi', description: 'Minimal 1 alat harus ada dalam peminjaman.', variant: 'destructive' });
+      return;
+    }
+    const hasEmptyAlat = editDetailList.some(item => !item.kode_alat);
+    if (hasEmptyAlat) {
+      toast({ title: 'Validasi', description: 'Silakan pilih alat untuk semua baris.', variant: 'destructive' });
+      return;
+    }
+
+    const namaPetugas = localStorage.getItem('auth_user') || 'admin';
+    setIsSubmittingEdit(true);
+    try {
+      const res = await runServerFunction(
+        'editDetailPinjam',
+        editingTrx.id_transaksi,
+        editDetailList,
+        namaPetugas
+      );
+      if (res.success) {
+        toast({ title: 'Berhasil', description: res.message });
+        setIsEditDetailOpen(false);
+        loadData();
+      } else {
+        throw new Error(res.error);
+      }
+    } catch (e: any) {
+      toast({ title: 'Gagal Menyimpan', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
   // State Modal Alat
   const [isAlatModalOpen, setIsAlatModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
@@ -144,9 +225,13 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       if (activeTab === 'transaksi') {
-        const res = await runServerFunction('getPeminjamanList');
-        if (res.success) setTransaksiList(res.data || []);
-        else throw new Error(res.error);
+        const [resTrx, resKat] = await Promise.all([
+          runServerFunction('getPeminjamanList'),
+          runServerFunction('getKatalogAlat')
+        ]);
+        if (resTrx.success) setTransaksiList(resTrx.data || []);
+        else throw new Error(resTrx.error);
+        if (resKat.success) setKatalogList(resKat.data || []);
       } else if (activeTab === 'katalog') {
         const res = await runServerFunction('getKatalogAlat');
         if (res.success) setKatalogList(res.data || []);
@@ -315,9 +400,12 @@ export default function AdminDashboard() {
                             </td>
                             <td className="px-6 py-4">{new Date(trx.tgl_pinjam).toLocaleDateString()} - {new Date(trx.tgl_kembali).toLocaleDateString()}</td>
                             <td className="px-6 py-4 text-center">
-                              <div className="flex justify-center gap-2">
+                              <div className="flex justify-center gap-2 flex-wrap">
                                 <Button variant="outline" size="sm" className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => openDetailTransaksi(trx.id_transaksi)}>
                                   Detail Alat
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-8 text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => openEditDetail(trx)}>
+                                  Edit Alat
                                 </Button>
                                 {trx.drive_file_id_surat && trx.drive_file_id_surat !== 'null' ? (
                                   <a href={`https://drive.google.com/file/d/${trx.drive_file_id_surat}/view`} target="_blank" rel="noreferrer" className="inline-flex items-center px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-md text-xs font-medium border border-green-200 transition-colors h-8">
@@ -326,6 +414,9 @@ export default function AdminDashboard() {
                                 ) : (
                                   <span className="inline-flex items-center px-3 py-1 text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-md h-8">Tidak ada file</span>
                                 )}
+                                <Button variant="outline" size="sm" className="h-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => { setDeletingTrxId(trx.id_transaksi); setIsDeleteConfirmOpen(true); }}>
+                                  Hapus
+                                </Button>
                               </div>
                             </td>
                           </tr>
@@ -625,6 +716,111 @@ export default function AdminDashboard() {
           
           <div className="pt-4 flex justify-end">
              <Button variant="outline" onClick={() => setIsDetailModalOpen(false)}>Tutup</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Konfirmasi Hapus Transaksi */}
+      <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-slate-800">Hapus Transaksi?</DialogTitle>
+            <DialogDescription className="text-slate-600">
+              Transaksi <strong className="text-blue-600">{deletingTrxId}</strong> akan dihapus permanen.
+              Semua alat dalam transaksi ini akan dikembalikan ke status <strong className="text-green-600">Ready</strong>.
+              Tindakan ini tidak bisa dibatalkan.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(false)}>Batal</Button>
+            <Button variant="destructive" onClick={handleDeleteTransaksi} disabled={isDeletingTrx}>
+              {isDeletingTrx ? 'Menghapus...' : 'Ya, Hapus Permanen'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Edit Detail Pinjaman */}
+      <Dialog open={isEditDetailOpen} onOpenChange={setIsEditDetailOpen}>
+        <DialogContent className="sm:max-w-2xl bg-white max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-slate-800">Edit Alat Dipinjam</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              Transaksi: <strong className="text-slate-700">{editingTrx?.id_transaksi}</strong> · {editingTrx?.nama_peminjam}
+              <br/>
+              <span className="text-amber-600 text-xs font-medium block mt-1">
+                ⚠ Alat lama akan direset ke Ready. Pastikan alat pengganti tersedia. Setiap perubahan dicatat di log audit.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-y-auto flex-1 space-y-3 py-2">
+            {isLoadingEditDetail ? (
+              <p className="text-center py-8 text-slate-500">Memuat data alat...</p>
+            ) : (
+              <>
+                {editDetailList.map((item, idx) => (
+                  <div key={idx} className="flex gap-3 items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <select
+                      value={item.kode_alat}
+                      onChange={e => {
+                        const next = [...editDetailList];
+                        next[idx] = { ...next[idx], kode_alat: e.target.value };
+                        setEditDetailList(next);
+                      }}
+                      className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">-- Pilih Alat --</option>
+                      {katalogList
+                        .filter(a => a.ketersediaan === 'Ready' || a.kode_alat === item.kode_alat)
+                        .map(a => (
+                          <option key={a.kode_alat} value={a.kode_alat}>
+                            {a.kode_alat} - {a.nama}
+                            {a.ketersediaan !== 'Ready' ? ` (${a.ketersediaan})` : ''}
+                          </option>
+                        ))
+                      }
+                    </select>
+                    <input
+                      type="number" min={1}
+                      value={item.jumlah}
+                      onChange={e => {
+                        const next = [...editDetailList];
+                        next[idx] = { ...next[idx], jumlah: Number(e.target.value) };
+                        setEditDetailList(next);
+                      }}
+                      className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    />
+                    <Button
+                      type="button" variant="ghost" size="icon"
+                      className="text-red-500 hover:bg-red-50"
+                      onClick={() => setEditDetailList(prev => prev.filter((_, i) => i !== idx))}
+                      disabled={editDetailList.length === 1}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button" variant="outline" size="sm"
+                  className="w-full text-blue-600 border-blue-200 hover:bg-blue-50"
+                  onClick={() => setEditDetailList(prev => [...prev, { kode_alat: '', jumlah: 1 }])}
+                >
+                  <Plus className="h-4 w-4 mr-1" /> Tambah Alat
+                </Button>
+              </>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setIsEditDetailOpen(false)}>Batal</Button>
+            <Button
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={handleSaveEditDetail}
+              disabled={isSubmittingEdit || isLoadingEditDetail}
+            >
+              {isSubmittingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
