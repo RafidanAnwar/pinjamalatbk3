@@ -1,0 +1,8 @@
+# Abaikan semua file dan folder secara default
+**/**
+
+# Hanya sertakan file yang dibutuhkan oleh Google Apps Script
+!Code.js
+!appsscript.json
+!index.html
+!utils.js

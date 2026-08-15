@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
+// @ts-ignore
 import {
   generateIdTransaksi,
   validateDataPeminjaman,
   validateDetailPinjam,
   parseKatalogRows,
   parseTransaksiRows,
-} from '../utils.js';
+} from '../../../backend/utils.js';
 
 describe('generateIdTransaksi', () => {
   it('harus menghasilkan ID dengan format TRX-XXXXXXXX (8 karakter alfanumerik)', () => {
