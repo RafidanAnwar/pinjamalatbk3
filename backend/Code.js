@@ -44,14 +44,19 @@ function doPost(e) {
       'editDetailPinjam': editDetailPinjam
     };
 
-    if (!allowedFunctions[action]) {
+    // Cari fungsi secara case-insensitive agar tidak sensitif huruf besar/kecil
+    var matchedKey = Object.keys(allowedFunctions).find(function(k) {
+      return k.toLowerCase() === (action || '').toLowerCase();
+    });
+
+    if (!matchedKey || !allowedFunctions[matchedKey]) {
       return ContentService.createTextOutput(JSON.stringify({
         success: false,
         error: 'Fungsi "' + action + '" tidak ditemukan atau tidak diizinkan.'
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    var result = allowedFunctions[action].apply(null, params);
+    var result = allowedFunctions[matchedKey].apply(null, params);
 
     return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);
