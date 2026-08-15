@@ -59,7 +59,7 @@ describe('AdminDashboard — Autentikasi & Navigasi', () => {
   });
 });
 
-describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
+describe('AdminDashboard — Tab Transaksi & Fitur Aksi (Row-Click & ActionPanel)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockNavigate.mockClear();
@@ -98,7 +98,7 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
     });
   });
 
-  it('harus membuka dialog Detail Peminjaman saat tombol Detail Alat diklik', async () => {
+  it('harus membuka ActionPanel saat baris data transaksi diklik', async () => {
     const user = userEvent.setup();
     renderDashboard();
 
@@ -106,13 +106,36 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
       expect(screen.getByText('TRX-ABCD1234')).toBeInTheDocument();
     });
 
-    const detailBtn = screen.getByRole('button', { name: /Detail Alat/i });
+    // Klik baris transaksi
+    const rowItem = screen.getByText('TRX-ABCD1234');
+    await user.click(rowItem);
+
+    // Verifikasi ActionPanel terbuka
+    expect(screen.getByText(/Pilihan Aksi/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Detail Peminjaman/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Edit Alat Dipinjam/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hapus Transaksi/i })).toBeInTheDocument();
+  });
+
+  it('harus membuka dialog Detail Peminjaman saat aksi Detail Peminjaman dipilih dari panel', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('TRX-ABCD1234')).toBeInTheDocument();
+    });
+
+    // Klik baris
+    await user.click(screen.getByText('TRX-ABCD1234'));
+
+    // Klik tombol aksi di ActionPanel
+    const detailBtn = screen.getByRole('button', { name: /Detail Peminjaman/i });
     await user.click(detailBtn);
 
     expect(screen.getByText(/Detail Peminjaman Alat/i)).toBeInTheDocument();
   });
 
-  it('harus membuka dialog konfirmasi Hapus saat tombol Hapus diklik', async () => {
+  it('harus membuka dialog konfirmasi Hapus saat aksi Hapus Transaksi dipilih dari panel', async () => {
     const user = userEvent.setup();
     renderDashboard();
 
@@ -120,7 +143,11 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
       expect(screen.getByText('TRX-ABCD1234')).toBeInTheDocument();
     });
 
-    const hapusBtn = screen.getByRole('button', { name: /Hapus/i });
+    // Klik baris
+    await user.click(screen.getByText('TRX-ABCD1234'));
+
+    // Klik Hapus Transaksi di panel
+    const hapusBtn = screen.getByRole('button', { name: /Hapus Transaksi/i });
     await user.click(hapusBtn);
 
     expect(screen.getByText(/Hapus Transaksi\?/i)).toBeInTheDocument();
@@ -135,7 +162,9 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
       expect(screen.getByText('TRX-ABCD1234')).toBeInTheDocument();
     });
 
-    const hapusBtn = screen.getByRole('button', { name: /Hapus/i });
+    // Klik baris lalu pilih Hapus
+    await user.click(screen.getByText('TRX-ABCD1234'));
+    const hapusBtn = screen.getByRole('button', { name: /Hapus Transaksi/i });
     await user.click(hapusBtn);
 
     const konfirmasiBtn = screen.getByRole('button', { name: /Ya, Hapus Permanen/i });
@@ -146,7 +175,7 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
     });
   });
 
-  it('harus membuka modal Edit Alat Dipinjam saat tombol Edit Alat diklik', async () => {
+  it('harus membuka modal Edit Alat Dipinjam saat aksi Edit dipilih dari panel', async () => {
     const user = userEvent.setup();
     renderDashboard();
 
@@ -154,10 +183,36 @@ describe('AdminDashboard — Tab Transaksi & Fitur Aksi', () => {
       expect(screen.getByText('TRX-ABCD1234')).toBeInTheDocument();
     });
 
-    const editAlatBtn = screen.getByRole('button', { name: /Edit Alat/i });
+    // Klik baris lalu pilih Edit Alat Dipinjam
+    await user.click(screen.getByText('TRX-ABCD1234'));
+    const editAlatBtn = screen.getByRole('button', { name: /Edit Alat Dipinjam/i });
     await user.click(editAlatBtn);
 
     expect(screen.getByText(/Edit Alat Dipinjam/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Simpan Perubahan/i })).toBeInTheDocument();
+  });
+
+  it('harus membuka ActionPanel dan modal Edit Alat saat baris katalog diklik', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    // Pindah ke tab katalog
+    const tabKatalog = screen.getByRole('button', { name: /Katalog Alat/i });
+    await user.click(tabKatalog);
+
+    await waitFor(() => {
+      expect(screen.getByText('High Volume Air Sampler')).toBeInTheDocument();
+    });
+
+    // Klik baris alat
+    await user.click(screen.getByText('High Volume Air Sampler'));
+
+    // Cek ActionPanel terbuka untuk katalog
+    const editDataBtn = screen.getByRole('button', { name: /Edit Data Alat/i });
+    expect(editDataBtn).toBeInTheDocument();
+    await user.click(editDataBtn);
+
+    // Form Edit Alat terbuka
+    expect(screen.getByText('Edit Alat')).toBeInTheDocument();
   });
 });

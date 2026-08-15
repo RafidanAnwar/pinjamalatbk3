@@ -7,11 +7,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { LogOut, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight, Trash2, Plus } from 'lucide-react';
+import {
+  LogOut,
+  PackageSearch,
+  RefreshCcw,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  Plus,
+  MoreHorizontal,
+  FileText,
+  Pencil,
+  ExternalLink,
+  Info
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { runServerFunction } from '@/lib/gas';
 import { toast } from '@/hooks/use-toast';
 import MonthlyReportGenerator, { Transaction } from '@/components/MonthlyReportGenerator';
+import ActionPanel, { ActionItem } from '@/components/ActionPanel';
 
 import { alatSchema, AlatFormValues } from '@/lib/schemas';
 
@@ -48,6 +62,11 @@ export default function AdminDashboard() {
   const [katalogList, setKatalogList] = useState<Alat[]>([]);
   const [laporanList, setLaporanList] = useState<Transaction[]>([]);
 
+  // State Side Panel Drawer Aksi
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [selectedTrx, setSelectedTrx] = useState<Transaksi | null>(null);
+  const [selectedAlat, setSelectedAlat] = useState<Alat | null>(null);
+
   // Filter States
   const [searchTransaksi, setSearchTransaksi] = useState('');
   const [searchKatalog, setSearchKatalog] = useState('');
@@ -62,6 +81,30 @@ export default function AdminDashboard() {
 
   useEffect(() => { setCurrentPageTransaksi(1); }, [searchTransaksi]);
   useEffect(() => { setCurrentPageKatalog(1); }, [searchKatalog, filterKetersediaan]);
+
+  // Tutup panel aksi saat berganti tab
+  useEffect(() => {
+    setIsPanelOpen(false);
+    setSelectedTrx(null);
+    setSelectedAlat(null);
+  }, [activeTab]);
+
+  // Handler Klik Baris
+  const handleRowClickTrx = (trx: Transaksi) => {
+    setSelectedTrx(trx);
+    setSelectedAlat(null);
+    setIsPanelOpen(true);
+  };
+
+  const handleRowClickAlat = (alat: Alat) => {
+    setSelectedAlat(alat);
+    setSelectedTrx(null);
+    setIsPanelOpen(true);
+  };
+
+  const closeActionPanel = () => {
+    setIsPanelOpen(false);
+  };
 
   // State Modal Detail Peminjaman
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -100,6 +143,9 @@ export default function AdminDashboard() {
       if (res.success) {
         toast({ title: 'Berhasil Dihapus', description: res.message });
         setIsDeleteConfirmOpen(false);
+        if (selectedTrx?.id_transaksi === deletingTrxId) {
+          setIsPanelOpen(false);
+        }
         loadData();
       } else {
         throw new Error(res.error);
@@ -298,6 +344,69 @@ export default function AdminDashboard() {
   const alatReady = katalogList.filter(a => a.ketersediaan === 'Ready').length;
   const alatDipinjam = katalogList.filter(a => a.ketersediaan === 'Dipinjam').length;
 
+  // Konfigurasi Aksi untuk ActionPanel Transaksi
+  const trxActions: ActionItem[] = selectedTrx ? [
+    {
+      label: 'Detail Peminjaman',
+      description: 'Lihat rincian alat dan jumlah yang dipinjam',
+      icon: <FileText className="h-5 w-5" />,
+      variant: 'default',
+      onClick: () => {
+        openDetailTransaksi(selectedTrx.id_transaksi);
+        setIsPanelOpen(false);
+      }
+    },
+    {
+      label: 'Edit Alat Dipinjam',
+      description: 'Ubah atau sesuaikan alat pada transaksi ini',
+      icon: <Pencil className="h-5 w-5" />,
+      variant: 'outline',
+      onClick: () => {
+        openEditDetail(selectedTrx);
+        setIsPanelOpen(false);
+      }
+    },
+    {
+      label: 'Lihat Surat Permohonan',
+      description: selectedTrx.drive_file_id_surat && selectedTrx.drive_file_id_surat !== 'null'
+        ? 'Buka file surat di tab baru Google Drive'
+        : 'Tidak ada file surat yang diunggah',
+      icon: <ExternalLink className="h-5 w-5" />,
+      variant: 'outline',
+      disabled: !selectedTrx.drive_file_id_surat || selectedTrx.drive_file_id_surat === 'null',
+      onClick: () => {
+        if (selectedTrx.drive_file_id_surat && selectedTrx.drive_file_id_surat !== 'null') {
+          window.open(`https://drive.google.com/file/d/${selectedTrx.drive_file_id_surat}/view`, '_blank');
+        }
+      }
+    },
+    {
+      label: 'Hapus Transaksi',
+      description: 'Hapus permanen & kembalikan status alat ke Ready',
+      icon: <Trash2 className="h-5 w-5" />,
+      variant: 'destructive',
+      onClick: () => {
+        setDeletingTrxId(selectedTrx.id_transaksi);
+        setIsDeleteConfirmOpen(true);
+        setIsPanelOpen(false);
+      }
+    }
+  ] : [];
+
+  // Konfigurasi Aksi untuk ActionPanel Katalog Alat
+  const alatActions: ActionItem[] = selectedAlat ? [
+    {
+      label: 'Edit Data Alat',
+      description: 'Ubah nama, kondisi, atau status ketersediaan alat',
+      icon: <Pencil className="h-5 w-5" />,
+      variant: 'default',
+      onClick: () => {
+        openEditAlat(selectedAlat);
+        setIsPanelOpen(false);
+      }
+    }
+  ] : [];
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
@@ -359,15 +468,26 @@ export default function AdminDashboard() {
             </div>
 
             <Card className="shadow-sm border-slate-200">
-              <CardHeader className="bg-white border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <CardTitle className="text-lg">Riwayat & Status Transaksi</CardTitle>
-                <div className="w-full sm:w-72">
-                  <Input
-                    placeholder="Cari ID, Nama, atau Lokasi..."
-                    value={searchTransaksi}
-                    onChange={e => setSearchTransaksi(e.target.value)}
-                    className="bg-slate-50"
-                  />
+              <CardHeader className="bg-white border-b border-slate-100 flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-lg">Riwayat & Status Transaksi</CardTitle>
+                    <p className="text-xs text-slate-500 mt-1">Daftar semua permohonan peminjaman sampling alat K3.</p>
+                  </div>
+                  <div className="w-full sm:w-72">
+                    <Input
+                      placeholder="Cari ID, Nama, atau Lokasi..."
+                      value={searchTransaksi}
+                      onChange={e => setSearchTransaksi(e.target.value)}
+                      className="bg-slate-50"
+                    />
+                  </div>
+                </div>
+
+                {/* Banner Petunjuk Interaksi */}
+                <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50/70 px-3.5 py-2 rounded-lg border border-blue-100">
+                  <Info className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                  <span><strong>Petunjuk:</strong> Klik pada baris data untuk melihat detail, edit alat, buka surat, atau hapus transaksi.</span>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -389,38 +509,41 @@ export default function AdminDashboard() {
                       ) : filteredTransaksi.length === 0 ? (
                         <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">Belum ada transaksi peminjaman.</td></tr>
                       ) : (
-                        currentTransaksi.map(trx => (
-                          <tr key={trx.id_transaksi} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-6 py-4 font-medium text-blue-600">{trx.id_transaksi}</td>
-                            <td className="px-6 py-4">{trx.nama_peminjam}</td>
-                            <td className="px-6 py-4">{trx.lokasi}</td>
-                            <td className="px-6 py-4">
-                              <div className="font-medium">{trx.jenis_pengujian || '-'}</div>
-                              <div className="text-xs text-slate-500">{trx.nomor_surat || '-'}</div>
-                            </td>
-                            <td className="px-6 py-4">{new Date(trx.tgl_pinjam).toLocaleDateString()} - {new Date(trx.tgl_kembali).toLocaleDateString()}</td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex justify-center gap-2 flex-wrap">
-                                <Button variant="outline" size="sm" className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => openDetailTransaksi(trx.id_transaksi)}>
-                                  Detail Alat
+                        currentTransaksi.map(trx => {
+                          const isSelected = isPanelOpen && selectedTrx?.id_transaksi === trx.id_transaksi;
+                          return (
+                            <tr
+                              key={trx.id_transaksi}
+                              onClick={() => handleRowClickTrx(trx)}
+                              className={`cursor-pointer transition-all duration-150 select-none ${
+                                isSelected
+                                  ? 'bg-blue-50/90 border-l-4 border-l-blue-600 font-medium'
+                                  : 'hover:bg-slate-50/90'
+                              }`}
+                            >
+                              <td className="px-6 py-4 font-semibold text-blue-600">{trx.id_transaksi}</td>
+                              <td className="px-6 py-4 text-slate-900">{trx.nama_peminjam}</td>
+                              <td className="px-6 py-4 text-slate-600">{trx.lokasi}</td>
+                              <td className="px-6 py-4">
+                                <div className="font-medium text-slate-800">{trx.jenis_pengujian || '-'}</div>
+                                <div className="text-xs text-slate-500">{trx.nomor_surat || '-'}</div>
+                              </td>
+                              <td className="px-6 py-4 text-slate-600">{new Date(trx.tgl_pinjam).toLocaleDateString()} - {new Date(trx.tgl_kembali).toLocaleDateString()}</td>
+                              <td className="px-6 py-4 text-center" onClick={e => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-full"
+                                  onClick={() => handleRowClickTrx(trx)}
+                                  title="Pilih Aksi"
+                                  aria-label={`Pilih aksi untuk ${trx.id_transaksi}`}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
                                 </Button>
-                                <Button variant="outline" size="sm" className="h-8 text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => openEditDetail(trx)}>
-                                  Edit Alat
-                                </Button>
-                                {trx.drive_file_id_surat && trx.drive_file_id_surat !== 'null' ? (
-                                  <a href={`https://drive.google.com/file/d/${trx.drive_file_id_surat}/view`} target="_blank" rel="noreferrer" className="inline-flex items-center px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-md text-xs font-medium border border-green-200 transition-colors h-8">
-                                    Lihat Surat
-                                  </a>
-                                ) : (
-                                  <span className="inline-flex items-center px-3 py-1 text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-md h-8">Tidak ada file</span>
-                                )}
-                                <Button variant="outline" size="sm" className="h-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => { setDeletingTrxId(trx.id_transaksi); setIsDeleteConfirmOpen(true); }}>
-                                  Hapus
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -484,7 +607,10 @@ export default function AdminDashboard() {
             <Card className="shadow-sm border-slate-200">
               <CardHeader className="bg-white border-b border-slate-100 flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <CardTitle className="text-lg">Database Katalog Alat</CardTitle>
+                  <div>
+                    <CardTitle className="text-lg">Database Katalog Alat</CardTitle>
+                    <p className="text-xs text-slate-500 mt-1">Kelola data inventaris, kondisi, dan status ketersediaan alat.</p>
+                  </div>
                   <div className="flex gap-2">
                     <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm" onClick={openAddAlat}>
                       + Tambah Alat
@@ -514,6 +640,12 @@ export default function AdminDashboard() {
                     <option value="Dimusnahkan">Dimusnahkan</option>
                   </select>
                 </div>
+
+                {/* Banner Petunjuk Interaksi */}
+                <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50/70 px-3.5 py-2 rounded-lg border border-blue-100">
+                  <Info className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                  <span><strong>Petunjuk:</strong> Klik pada baris alat untuk mengedit spesifikasi, kondisi, atau status ketersediaan.</span>
+                </div>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -533,29 +665,49 @@ export default function AdminDashboard() {
                       ) : filteredKatalog.length === 0 ? (
                         <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">Tidak ada alat yang sesuai pencarian/filter.</td></tr>
                       ) : (
-                        currentKatalog.map(item => (
-                          <tr key={item.kode_alat} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-6 py-4 font-medium text-slate-900">{item.kode_alat}</td>
-                            <td className="px-6 py-4 text-slate-600">{item.nama}</td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={`px-2 py-1 rounded text-xs font-semibold ${item.kondisi === 'Baik' ? 'bg-green-50 text-green-700' :
-                                item.kondisi === 'Diperingatkan' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
-                                }`}>
-                                {item.kondisi}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={`px-2 py-1 rounded text-xs font-semibold ${item.ketersediaan === 'Ready' ? 'bg-blue-50 text-blue-700' :
-                                item.ketersediaan === 'Dipinjam' ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'
-                                }`}>
-                                {item.ketersediaan}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <Button variant="ghost" size="sm" className="text-blue-600 h-8" onClick={() => openEditAlat(item)}>Edit</Button>
-                            </td>
-                          </tr>
-                        ))
+                        currentKatalog.map(item => {
+                          const isSelected = isPanelOpen && selectedAlat?.kode_alat === item.kode_alat;
+                          return (
+                            <tr
+                              key={item.kode_alat}
+                              onClick={() => handleRowClickAlat(item)}
+                              className={`cursor-pointer transition-all duration-150 select-none ${
+                                isSelected
+                                  ? 'bg-blue-50/90 border-l-4 border-l-blue-600 font-medium'
+                                  : 'hover:bg-slate-50/90'
+                              }`}
+                            >
+                              <td className="px-6 py-4 font-semibold text-slate-900">{item.kode_alat}</td>
+                              <td className="px-6 py-4 text-slate-700">{item.nama}</td>
+                              <td className="px-6 py-4 text-center">
+                                <span className={`px-2 py-1 rounded text-xs font-semibold ${item.kondisi === 'Baik' ? 'bg-green-50 text-green-700' :
+                                  item.kondisi === 'Diperingatkan' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                                  }`}>
+                                  {item.kondisi}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <span className={`px-2 py-1 rounded text-xs font-semibold ${item.ketersediaan === 'Ready' ? 'bg-blue-50 text-blue-700' :
+                                  item.ketersediaan === 'Dipinjam' ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'
+                                  }`}>
+                                  {item.ketersediaan}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-center" onClick={e => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-full"
+                                  onClick={() => handleRowClickAlat(item)}
+                                  title="Pilih Aksi"
+                                  aria-label={`Pilih aksi untuk ${item.kode_alat}`}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -604,6 +756,43 @@ export default function AdminDashboard() {
           </div>
         )}
       </main>
+
+      {/* Side Panel Drawer Aksi Transaksi */}
+      {selectedTrx && (
+        <ActionPanel
+          isOpen={isPanelOpen}
+          onClose={closeActionPanel}
+          title={selectedTrx.id_transaksi}
+          subtitle={selectedTrx.nama_peminjam}
+          badge={{ text: 'Transaksi', variant: 'blue' }}
+          meta={[
+            { label: 'Lokasi/Instansi', value: selectedTrx.lokasi },
+            { label: 'Keperluan', value: selectedTrx.jenis_pengujian || '-' },
+            { label: 'Tgl Pinjam', value: new Date(selectedTrx.tgl_pinjam).toLocaleDateString() },
+            { label: 'Tgl Kembali', value: new Date(selectedTrx.tgl_kembali).toLocaleDateString() },
+          ]}
+          actions={trxActions}
+        />
+      )}
+
+      {/* Side Panel Drawer Aksi Katalog Alat */}
+      {selectedAlat && (
+        <ActionPanel
+          isOpen={isPanelOpen}
+          onClose={closeActionPanel}
+          title={selectedAlat.kode_alat}
+          subtitle={selectedAlat.nama}
+          badge={{
+            text: selectedAlat.ketersediaan,
+            variant: selectedAlat.ketersediaan === 'Ready' ? 'green' : selectedAlat.ketersediaan === 'Dipinjam' ? 'purple' : 'yellow'
+          }}
+          meta={[
+            { label: 'Kondisi', value: selectedAlat.kondisi },
+            { label: 'Ketersediaan', value: selectedAlat.ketersediaan },
+          ]}
+          actions={alatActions}
+        />
+      )}
 
       {/* Dialog Form Alat */}
       <Dialog open={isAlatModalOpen} onOpenChange={setIsAlatModalOpen}>
